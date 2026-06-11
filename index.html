@@ -753,7 +753,7 @@
                 <div class="card">
                     <div class="card-title">
                         <i class="fa-solid fa-scale-unbalanced-stroke"></i>
-                        Pre-Adjustment Weights (g)
+                        Pre-Adjustment Weights (g) (empty pouch)
                     </div>
                     
                     <div class="input-group-row">
@@ -785,7 +785,7 @@
                 <div class="card">
                     <div class="card-title">
                         <i class="fa-solid fa-scale-balanced"></i>
-                        Post-Adjustment Weights (g)
+                        Post-Adjustment Weights (g) (filled pouch)
                     </div>
                     
                     <div class="input-group-row">
@@ -993,6 +993,313 @@
                 // Inputs
                 const pre = [
                     parseFloat(document.getElementById('pre1').value),
+                    parseFloat(document.getElementById('pre2').value),
+                    parseFloat(document.getElementById('pre3').value)
+                ];
+                const post = [
+                    parseFloat(document.getElementById('post1').value),
+                    parseFloat(document.getElementById('post2').value),
+                    parseFloat(document.getElementById('post3').value)
+                ];
+
+                // Validate inputs
+                if (pre.some(isNaN) || post.some(isNaN)) {
+                    alert("Please enter all weight values correctly.");
+                    return;
+                }
+
+                // Compute weights in mg
+                const weights = pre.map((val, idx) => (post[idx] - val) * 1000);
+                const meanWeight = weights.reduce((a, b) => a + b, 0) / 3;
+
+                const inSpec = (v) => v >= LOW_SPEC && v <= HIGH_SPEC;
+                const pouch_ok = weights.map(inSpec);
+                const all_ok = pouch_ok.every(v => v === true);
+                const mean_ok = inSpec(meanWeight);
+
+                // Calculations for Dial Adjustment
+                const deltaMg = TARGET - meanWeight;
+                const isReduce = deltaMg < 0;
+                const direction = isReduce ? "Clockwise (Reduce)" : "Counterclockwise (Increase)";
+
+                const totalMm = Math.abs(deltaMg) / MG_PER_MM;
+                const turns = Math.floor(totalMm / MM_PER_TURN);
+                let remainingMm = totalMm - (turns * MM_PER_TURN);
+
+                const ticks = Math.floor(remainingMm / TICK_MM);
+                remainingMm -= ticks * TICK_MM;
+
+                const mid = remainingMm >= MID_TICK_MM ? 1 : 0;
+
+                const overallStatus = (all_ok && mean_ok) ? "GOOD" : "OUT OF SPEC";
+
+                // Render UI
+                const statusBadge = document.getElementById('status-badge');
+                statusBadge.className = 'status-badge ' + (overallStatus === 'GOOD' ? 'good' : 'out');
+                statusBadge.textContent = overallStatus;
+
+                // Render individual pouch items
+                for (let i = 0; i < 3; i++) {
+                    const pouchVal = document.getElementById(`pouch-val-${i+1}`);
+                    const pouchInd = document.getElementById(`pouch-ind-${i+1}`);
+                    const pouchCard = document.getElementById(`pouch-card-${i+1}`);
+                    
+                    pouchVal.textContent = `${weights[i].toFixed(2)} mg`;
+                    pouchCard.className = 'pouch-stat-card ' + (pouch_ok[i] ? 'good' : 'out');
+                    
+                    if (pouch_ok[i]) {
+                        pouchInd.className = 'p-indicator good';
+                        pouchInd.innerHTML = '<i class="fa-solid fa-circle-check"></i> In Spec';
+                    } else {
+                        pouchInd.className = 'p-indicator out';
+                        pouchInd.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Out';
+                    }
+                }
+
+                // Mean display
+                document.getElementById('mean-value').textContent = `${meanWeight.toFixed(2)} mg`;
+                
+                // Adjustment dashboard
+                document.getElementById('recipe-mm').textContent = `${totalMm.toFixed(2)} mm`;
+                
+                const dirEl = document.getElementById('recipe-dir');
+                dirEl.className = 'recipe-direction ' + (isReduce ? 'reduce' : 'increase');
+                dirEl.innerHTML = isReduce 
+                    ? '<i class="fa-solid fa-rotate-right"></i> Clockwise (Reduce)' 
+                    : '<i class="fa-solid fa-rotate-left"></i> Counterclockwise (Increase)';
+
+                document.getElementById('rb-turns').textContent = turns;
+                document.getElementById('rb-ticks').textContent = ticks;
+                document.getElementById('rb-mid').textContent = mid;
+
+                // Show results card
+                document.getElementById('results-card').style.display = 'block';
+
+                // Scroll to results
+                document.getElementById('results-card').scrollIntoView({ behavior: 'smooth' });
+
+                // Save to History
+                saveLog({
+                    timestamp: new Date().toISOString(),
+                    weights: weights.map(w => w.toFixed(2)),
+                    mean: meanWeight.toFixed(2),
+                    status: overallStatus,
+                    mm: totalMm.toFixed(2),
+                    direction: direction,
+                    recipe: `${turns} Turns, ${ticks} Ticks, ${mid} Mid`
+                });
+
+            } catch (e) {
+                alert("An error occurred during calculation. Please check your inputs.");
+                console.error(e);
+            }
+        }
+
+        // Save Log in LocalStorage
+        function saveLog(logEntry) {
+            let history = JSON.parse(localStorage.getItem('zirc_history') || '[]');
+            history.unshift(logEntry); // Add to beginning
+            localStorage.setItem('zirc_history', JSON.stringify(history));
+        }
+
+        // Render History Tab
+        function renderHistory() {
+            const history = JSON.parse(localStorage.getItem('zirc_history') || '[]');
+            const container = document.getElementById('history-list-container');
+            
+            if (history.length === 0) {
+                container.innerHTML = `
+                    <div class="history-empty">
+                        <i class="fa-solid fa-folder-open"></i>
+                        No adjustments recorded yet.
+                    </div>
+                `;
+                drawChart([]);
+                return;
+            }
+
+            container.innerHTML = history.map((item, idx) => {
+                const formattedDate = new Date(item.timestamp).toLocaleString();
+                const isGood = item.status === 'GOOD';
+                return `
+                    <div class="history-item ${isGood ? 'item-good' : 'item-out'}">
+                        <div class="history-item-header">
+                            <span class="history-time">${formattedDate}</span>
+                            <span class="history-badge ${isGood ? 'good' : 'out'}">${item.status}</span>
+                        </div>
+                        <div class="history-details">
+                            <div class="history-stats">
+                                <span>Pouch Mean: <strong>${item.mean} mg</strong></span>
+                                <span>Samples: ${item.weights.join(', ')} mg</span>
+                            </div>
+                            <div class="history-adjustment">
+                                <span class="h-recipe">${item.recipe}</span>
+                                <span class="h-mm">${item.mm} mm (${item.direction.split(' ')[0]})</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            drawChart(history);
+        }
+
+        // Drawing Chart (Dynamic Canvas Drawing)
+        function drawChart(history) {
+            const canvas = document.getElementById('trendChart');
+            const ctx = canvas.getContext('2d');
+            
+            // Adjust resolution for Retina screens
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvas.parentElement.clientWidth * dpr;
+            canvas.height = 140 * dpr;
+            ctx.scale(dpr, dpr);
+            
+            const w = canvas.width / dpr;
+            const h = canvas.height / dpr;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // If empty, draw placeholder lines
+            if (history.length === 0) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(20, h/2);
+                ctx.lineTo(w - 20, h/2);
+                ctx.stroke();
+                return;
+            }
+
+            // Keep maximum of last 10 points in chronological order (left to right)
+            const dataPoints = history.slice(0, 10).reverse();
+            
+            // Y Scale mapping (min: 200, max: 400)
+            const yMin = 200;
+            const yMax = 400;
+            
+            const getX = (idx) => 30 + (idx * ((w - 60) / Math.max(1, dataPoints.length - 1)));
+            const getY = (val) => h - 20 - ((val - yMin) * ((h - 40) / (yMax - yMin)));
+
+            // Draw Specs limits shading
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.05)';
+            ctx.fillRect(0, getY(345), w, getY(255) - getY(345));
+
+            // Specs lines
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            
+            // Upper limit
+            ctx.beginPath();
+            ctx.moveTo(0, getY(345)); ctx.lineTo(w, getY(345));
+            ctx.stroke();
+            
+            // Lower limit
+            ctx.beginPath();
+            ctx.moveTo(0, getY(255)); ctx.lineTo(w, getY(255));
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Target Line (300 mg)
+            ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, getY(300)); ctx.lineTo(w, getY(300));
+            ctx.stroke();
+
+            // Label specs
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.font = '9px Outfit';
+            ctx.fillText('345 mg (High Spec)', 5, getY(345) - 4);
+            ctx.fillText('300 mg (Target)', 5, getY(300) - 4);
+            ctx.fillText('255 mg (Low Spec)', 5, getY(255) + 12);
+
+            // Draw Trend Line
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            dataPoints.forEach((pt, idx) => {
+                const val = parseFloat(pt.mean);
+                if (idx === 0) ctx.moveTo(getX(idx), getY(val));
+                else ctx.lineTo(getX(idx), getY(val));
+            });
+            ctx.stroke();
+
+            // Draw Dots
+            dataPoints.forEach((pt, idx) => {
+                const val = parseFloat(pt.mean);
+                const ptX = getX(idx);
+                const ptY = getY(val);
+                const isInSpec = val >= LOW_SPEC && val <= HIGH_SPEC;
+
+                ctx.fillStyle = isInSpec ? '#10b981' : '#ef4444';
+                ctx.beginPath();
+                ctx.arc(ptX, ptY, 4.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = '#090d16';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(ptX, ptY, 4.5, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+        }
+
+        // Modal Controls
+        function openClearModal() {
+            document.getElementById('clearModal').style.display = 'flex';
+        }
+
+        function closeClearModal() {
+            document.getElementById('clearModal').style.display = 'none';
+        }
+
+        function clearHistory() {
+            localStorage.removeItem('zirc_history');
+            closeClearModal();
+            renderHistory();
+        }
+
+        // Export Logs to CSV
+        function exportCSV() {
+            const history = JSON.parse(localStorage.getItem('zirc_history') || '[]');
+            if (history.length === 0) {
+                alert("No history data to export.");
+                return;
+            }
+
+            const headers = ["Timestamp", "Pouch1_mg", "Pouch2_mg", "Pouch3_mg", "Mean_mg", "Status", "Move_mm", "Direction", "Adjustment Recipe"];
+            const csvRows = [headers.join(",")];
+
+            history.forEach(item => {
+                const row = [
+                    `"${new Date(item.timestamp).toLocaleString()}"`,
+                    item.weights[0],
+                    item.weights[1],
+                    item.weights[2],
+                    item.mean,
+                    `"${item.status}"`,
+                    item.mm,
+                    `"${item.direction}"`,
+                    `"${item.recipe}"`
+                ];
+                csvRows.push(row.join(","));
+            });
+
+            const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `PLA2_Zirc_Adjustment_Log_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
+
                     parseFloat(document.getElementById('pre2').value),
                     parseFloat(document.getElementById('pre3').value)
                 ];
