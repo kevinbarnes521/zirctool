@@ -757,6 +757,21 @@
             <!-- CALCULATOR TAB VIEW -->
             <div id="tab-calculator" class="tab-content active">
                 
+                <!-- Target Weight Card -->
+                <div class="card">
+                    <div class="card-title">
+                        <i class="fa-solid fa-bullseye" style="color: var(--primary-blue);"></i>
+                        Target Weight Configuration (mg)
+                    </div>
+                    <div style="margin-top: 10px; display: flex; justify-content: center; align-items: center; gap: 15px;">
+                        <span style="font-size: 14px; color: var(--text-secondary-dark); font-weight: 500;">Set Target:</span>
+                        <div class="input-wrapper" style="width: 140px; margin-bottom: 0;">
+                            <span class="unit-prefix">mg</span>
+                            <input type="number" id="targetWeight" value="300" step="1" placeholder="300" inputmode="numeric" style="font-size: 16px; font-weight: 700; text-align: center; color: var(--primary-blue);">
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Pre Weights -->
                 <div class="card">
                     <div class="card-title">
@@ -856,7 +871,7 @@
                     <div class="mean-display">
                         <div class="mean-info-label">
                             <span>Mean Sample Weight</span>
-                            <span>Target: 300 mg</span>
+                            <span id="target-display">Target: 300 mg</span>
                         </div>
                         <div id="mean-value" class="mean-value">-- mg</div>
                     </div>
@@ -909,7 +924,7 @@
                 <div class="card analytics-card">
                     <div class="card-title">
                         <i class="fa-solid fa-chart-line"></i>
-                        Mean Trend (Target: 300 mg)
+                        <span id="trend-title">Mean Trend (Target: 300 mg)</span>
                     </div>
                     <div class="chart-container">
                         <canvas id="trendChart"></canvas>
@@ -1086,7 +1101,8 @@
                 const mean_ok = inSpec(meanWeight);
 
                 // Calculations for Dial Adjustment
-                const deltaMg = TARGET - meanWeight;
+                const targetValue = parseFloat(document.getElementById('targetWeight').value) || 300;
+                const deltaMg = targetValue - meanWeight;
                 const isReduce = deltaMg < 0;
                 const direction = isReduce ? "Clockwise (Reduce)" : "Counterclockwise (Increase)";
 
@@ -1126,6 +1142,7 @@
 
                 // Mean display
                 document.getElementById('mean-value').textContent = `${meanWeight.toFixed(2)} mg`;
+                document.getElementById('target-display').textContent = `Target: ${targetValue} mg`;
                 
                 // Adjustment dashboard
                 document.getElementById('recipe-mm').textContent = `${totalMm.toFixed(2)} mm`;
@@ -1168,6 +1185,30 @@
             let history = getSafeHistory();
             history.unshift(logEntry); // Add to beginning
             safeStorage.setItem('zirc_history', JSON.stringify(history));
+
+            // Also save to python-bridged CSV if running in desktop PyWebView app
+            if (window.pywebview && window.pywebview.api) {
+                // Parse turns, ticks, mid from recipe string (e.g. "X Turns, Y Ticks, Z Mid")
+                const recipeParts = logEntry.recipe.split(' ');
+                const turnsVal = parseInt(recipeParts[0]) || 0;
+                const ticksVal = parseInt(recipeParts[2]) || 0;
+                const midVal = parseInt(recipeParts[4]) || 0;
+
+                window.pywebview.api.saveCSV(
+                    logEntry.weights.map(w => parseFloat(w)),
+                    parseFloat(logEntry.mean),
+                    logEntry.status,
+                    parseFloat(logEntry.mm),
+                    logEntry.direction,
+                    turnsVal,
+                    ticksVal,
+                    midVal
+                ).then(response => {
+                    console.log("Local CSV write response:", response);
+                }).catch(err => {
+                    console.error("Local CSV write error:", err);
+                });
+            }
         }
 
         // Render History Tab
@@ -1269,18 +1310,24 @@
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Target Line (300 mg)
+            const currentTarget = parseFloat(document.getElementById('targetWeight')?.value) || 300;
+            const trendTitle = document.getElementById('trend-title');
+            if (trendTitle) {
+                trendTitle.textContent = `Mean Trend (Target: ${currentTarget} mg)`;
+            }
+
+            // Target Line
             ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)';
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(0, getY(300)); ctx.lineTo(w, getY(300));
+            ctx.moveTo(0, getY(currentTarget)); ctx.lineTo(w, getY(currentTarget));
             ctx.stroke();
 
             // Label specs
             ctx.fillStyle = 'rgba(255,255,255,0.3)';
             ctx.font = '9px Outfit';
             ctx.fillText('345 mg (High Spec)', 5, getY(345) - 4);
-            ctx.fillText('300 mg (Target)', 5, getY(300) - 4);
+            ctx.fillText(`${currentTarget} mg (Target)`, 5, getY(currentTarget) - 4);
             ctx.fillText('255 mg (Low Spec)', 5, getY(255) + 12);
 
             // Draw Trend Line
